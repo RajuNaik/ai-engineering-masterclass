@@ -1,0 +1,5 @@
+conversation_store.db
+conversation_store.db-shm
+conversation_store.db-wal
+__pycache__/
+*.pyc

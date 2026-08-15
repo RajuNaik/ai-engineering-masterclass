@@ -54,7 +54,10 @@ while True:
         }
     )
 
+    # -----------------------------------------------------
     # Send conversation history to Llama
+    # -----------------------------------------------------
+
     response = ollama.chat(
         model="llama3.2",
         messages=messages
@@ -63,7 +66,10 @@ while True:
     # Extract AI response
     answer = response["message"]["content"]
 
+    # -----------------------------------------------------
     # Add AI response to conversation history
+    # -----------------------------------------------------
+
     messages.append(
         {
             "role": "assistant",
@@ -73,4 +79,16 @@ while True:
 
     # Display AI response
     print("\nAI:", answer)
-    print()
+
+    # -----------------------------------------------------
+    # Token / inference metrics
+    # -----------------------------------------------------
+
+    prompt_tokens = response.get("prompt_eval_count")
+    output_tokens = response.get("eval_count")
+
+    print("\n--- LLM Metrics ---")
+    print(f"Messages in application memory : {len(messages)}")
+    print(f"Input tokens for this request  : {prompt_tokens}")
+    print(f"Output tokens generated        : {output_tokens}")
+    print("-------------------\n")

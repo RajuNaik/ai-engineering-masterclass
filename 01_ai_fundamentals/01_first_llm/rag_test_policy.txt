@@ -1,0 +1,21 @@
+RAG Enterprise Ingestion Test
+
+Document Title: Enterprise Travel and Expense Policy
+Document ID: POL-TRAVEL-001
+Version: 1.0
+Department: Finance
+
+Purpose
+This document is a test enterprise document for validating the RAG ingestion pipeline. It represents the type of internal knowledge that will later be parsed, chunked, embedded, indexed, and retrieved by our RAG system.
+
+Travel Expense Policy
+Employees must submit eligible travel expenses within 15 calendar days after returning from a business trip. Hotel expenses must comply with the employee's applicable travel allowance. Receipts are required for reimbursable expenses above the applicable company threshold.
+
+Ingestion Test Metadata
+Source: Local Development Environment
+Destination: Azure Data Lake Storage Gen2
+Raw Container: rag-raw
+Raw Directory: files
+Purpose: Validate source-to-raw ingestion only.
+
+Important: This document is intentionally stored as raw source content. No parsing, chunking, embedding, or vector indexing should be performed at the ingestion stage.

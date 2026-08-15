@@ -256,6 +256,7 @@ We intentionally started without LangChain, RAG, agents, vector databases, or ot
 - Per-request LLM input/output token metrics
 - Context manager using recent-turn selection
 - Context compaction/summarization experiment
+- Persistent conversation storage and resume by conversation ID
 
 ## Current conversation state
 
@@ -451,7 +452,285 @@ LLM response
 
 ---
 
-# 10. Router / Orchestration — AI Engineer Scope
+# 10. Canonical Enterprise AI Mental Model
+
+This is the **canonical architecture diagram for the masterclass**. It is intentionally generic and contains no single business example.
+
+```text
+                                      ┌─────────────────────┐
+                                      │        USER         │
+                                      │                     │
+                                      │  Current Request    │
+                                      └──────────┬──────────┘
+                                                 │
+                                                 ▼
+                              ┌──────────────────────────────┐
+                              │      API / CHAT LAYER        │
+                              │                              │
+                              │ • Receive request            │
+                              │ • Authentication             │
+                              │ • Request metadata           │
+                              └──────────────┬───────────────┘
+                                             │
+                                             ▼
+                              ┌──────────────────────────────┐
+                              │       SESSION MANAGER        │
+                              │                              │
+                              │ • user_id                    │
+                              │ • conversation_id            │
+                              │ • session state              │
+                              └──────────────┬───────────────┘
+                                             │
+                                             ▼
+                    ┌────────────────────────────────────────────────┐
+                    │              CONVERSATION STORE                │
+                    │                                                │
+                    │                 CHAT HISTORY                   │
+                    │                                                │
+                    │                  "What happened?"              │
+                    │                                                │
+                    │ • Raw user messages                            │
+                    │ • Raw assistant messages                       │
+                    │ • Timestamps                                   │
+                    │ • Conversation metadata                        │
+                    │ • Complete conversation record                 │
+                    └────────────────────────┬───────────────────────┘
+                                             │
+                                             ▼
+                              ┌──────────────────────────────┐
+                              │     ORCHESTRATOR / ROUTER    │
+                              │                              │
+                              │ "What capability/source     │
+                              │  does this request require?"│
+                              └──────────────┬───────────────┘
+                                             │
+                    ┌────────────────────────┼────────────────────────┐
+                    │                        │                        │
+                    ▼                        ▼                        ▼
+        ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+        │   CHAT HISTORY    │    │      MEMORY       │    │       RAG         │
+        │                   │    │                   │    │                   │
+        │ "What happened?" │    │ "Remember this"   │    │ "What does the    │
+        │                   │    │                   │    │  enterprise know?"│
+        │ • Recent turns    │    │ • Preferences     │    │                   │
+        │ • Old turns       │    │ • Durable facts   │    │ • Documents       │
+        │ • Historical      │    │ • Project context │    │ • Policies        │
+        │   conversation    │    │ • Goals           │    │ • SOPs            │
+        └─────────┬─────────┘    └─────────┬─────────┘    │ • Knowledge bases│
+                  │                        │              └─────────┬─────────┘
+                  │                        │                        │
+                  ▼                        ▼                        ▼
+        ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+        │ HISTORY RETRIEVAL │    │ MEMORY RETRIEVAL  │    │  RAG RETRIEVAL    │
+        │                   │    │                   │    │                   │
+        │ • Recent window   │    │ • Relevant facts  │    │ • Query           │
+        │ • Historical      │    │ • Relevant state  │    │ • Retrieve        │
+        │   search          │    │ • Relevant prefs  │    │ • Filter          │
+        │ • Relevance       │    │ • Relevance       │    │ • Rank            │
+        │   ranking         │    │   ranking         │    │ • Rerank          │
+        └─────────┬─────────┘    └─────────┬─────────┘    └─────────┬─────────┘
+                  │                        │                        │
+                  └────────────────────────┼────────────────────────┘
+                                           │
+                                           ▼
+                              ┌──────────────────────────────┐
+                              │        TOOLS / APIs          │
+                              │                              │
+                              │ • SQL                        │
+                              │ • REST APIs                  │
+                              │ • Enterprise applications   │
+                              │ • Live operational systems  │
+                              │ • Actions / transactions    │
+                              └──────────────┬───────────────┘
+                                             │
+                                             ▼
+                              ┌──────────────────────────────┐
+                              │       CONTEXT MANAGER        │
+                              │                              │
+                              │ "What information should    │
+                              │  the LLM actually see?"     │
+                              │                              │
+                              │ • Task relevance             │
+                              │ • Recency                    │
+                              │ • Source authority           │
+                              │ • Conversation continuity    │
+                              │ • Information priority       │
+                              │ • Token budget               │
+                              │ • Latency / cost              │
+                              └──────────────┬───────────────┘
+                                             │
+                                             ▼
+                              ┌──────────────────────────────┐
+                              │       CONTEXT BUILDER        │
+                              │                              │
+                              │ Assemble final model input: │
+                              │                              │
+                              │ • System instructions       │
+                              │ • Relevant chat history     │
+                              │ • Memory                     │
+                              │ • RAG results                │
+                              │ • Tool results               │
+                              │ • Current request            │
+                              │                              │
+                              │ Apply:                       │
+                              │ • Ordering                   │
+                              │ • Filtering                  │
+                              │ • Formatting                 │
+                              │ • Token limits               │
+                              └──────────────┬───────────────┘
+                                             │
+                                             ▼
+                              ┌──────────────────────────────┐
+                              │             LLM              │
+                              │                              │
+                              │ • Understand context         │
+                              │ • Reason                     │
+                              │ • Generate response          │
+                              │ • Produce structured output │
+                              │ • Request tool calls         │
+                              └──────────────┬───────────────┘
+                                             │
+                              ┌──────────────┴──────────────┐
+                              │                             │
+                              ▼                             ▼
+                  ┌────────────────────┐       ┌──────────────────────┐
+                  │    FINAL ANSWER    │       │      TOOL CALL       │
+                  │                    │       │                      │
+                  │ Return response    │       │ Requested action     │
+                  │ to user            │       │ / external operation │
+                  └─────────┬──────────┘       └──────────┬───────────┘
+                            │                             │
+                            │                             ▼
+                            │                  ┌──────────────────────┐
+                            │                  │  ENTERPRISE SYSTEM   │
+                            │                  │                      │
+                            │                  │ SQL / API / Service  │
+                            │                  └──────────┬───────────┘
+                            │                             │
+                            │                             ▼
+                            │                  ┌──────────────────────┐
+                            │                  │     TOOL RESULT      │
+                            │                  └──────────┬───────────┘
+                            │                             │
+                            │                             ▼
+                            │                  ┌──────────────────────┐
+                            │                  │   ORCHESTRATOR /     │
+                            │                  │   CONTEXT MANAGER    │
+                            │                  │                      │
+                            │                  │ Re-evaluate context  │
+                            │                  │ and continue workflow│
+                            │                  └──────────┬───────────┘
+                            │                             │
+                            │                             ▼
+                            │                            LLM
+                            │                             │
+                            │                             ▼
+                            │                       FINAL ANSWER
+                            │                             │
+                            └─────────────────────────────┘
+                                                          │
+                                                          ▼
+                                                         USER
+```
+
+## Information-source layer
+
+```text
+                         INFORMATION SOURCES
+                                  │
+          ┌───────────────────────┼────────────────────────┐
+          │                       │                        │
+          ▼                       ▼                        ▼
+ ┌────────────────┐      ┌────────────────┐       ┌────────────────┐
+ │  CHAT HISTORY  │      │     MEMORY     │       │      RAG       │
+ │                │      │                │       │                │
+ │ "What happened?"│     │ "Remember this"│       │ "What does the │
+ │                │      │                │       │ enterprise     │
+ │ Raw conversation│     │ Durable facts  │       │ know?"         │
+ │ Recent turns   │      │ Preferences    │       │                │
+ │ Historical turns│     │ Goals          │       │ Documents      │
+ └───────┬────────┘      │ Project state  │       │ Policies       │
+         │               └───────┬────────┘       │ SOPs           │
+         ▼                       ▼                │ Knowledge base │
+ ┌────────────────┐      ┌────────────────┐       └───────┬────────┘
+ │History Retrieval│     │Memory Retrieval│               │
+ └───────┬────────┘      └───────┬────────┘               │
+         │                       │                        │
+         └───────────────────────┼────────────────────────┘
+                                 │
+                                 ▼
+                         ┌───────────────┐
+                         │ CONTEXT       │
+                         │ MANAGER       │
+                         └───────┬───────┘
+                                 │
+                                 ▼
+                         ┌───────────────┐
+                         │ CONTEXT       │
+                         │ BUILDER       │
+                         └───────┬───────┘
+                                 │
+                                 ▼
+                                LLM
+```
+
+Tools sit alongside these information sources because they are fundamentally different:
+
+```text
+RAG
+ │
+ └── "What does the enterprise know?"
+       → Retrieve knowledge
+
+TOOLS
+ │
+ └── "What is live / what can we do?"
+       → Read live data
+       → Execute actions
+       → Change enterprise state
+```
+
+## Responsibility chain
+
+```text
+SESSION MANAGER
+    │
+    └── "Which conversation?"
+
+ROUTER / ORCHESTRATOR
+    │
+    └── "Which capability/source?"
+
+RETRIEVAL
+    │
+    └── "What might be relevant?"
+
+CONTEXT MANAGER
+    │
+    └── "What should the LLM see?"
+
+CONTEXT BUILDER
+    │
+    └── "How do we package it?"
+
+LLM
+    │
+    └── "What should I generate / what action should I request?"
+
+TOOLS
+    │
+    └── "Read/change the external system"
+
+AGENT / ORCHESTRATOR
+    │
+    └── "What should happen next?"
+```
+
+### Golden boundary
+
+> **Router decides what capability/source is needed. Context Manager decides what information the LLM should see. Context Builder assembles that information into the model request. The LLM reasons and generates using the supplied context.**
+
+# 11. Router / Orchestration — AI Engineer Scope
 
 The **routing/orchestration layer is primarily an AI Engineer responsibility** in the application architecture.
 
@@ -614,7 +893,7 @@ The LLM should not be treated as the enterprise database or as the source of tru
 
 This is a core AI Engineer responsibility and will become central to our eventual enterprise agent.
 
-# 11. RAG — Future Practical Module
+# 12. RAG — Future Practical Module
 
 Core RAG pipeline:
 
@@ -655,7 +934,7 @@ RAG is a major context-engineering mechanism, not a replacement for context engi
 
 Chunking, retrieval embeddings, vector storage/search, metadata filtering, reranking, retrieval evaluation, and context construction are primarily AI Engineer/RAG application responsibilities. The generation model remains an existing model component unless we choose to train/fine-tune one.
 
-# 12. Roadmap
+# 13. Roadmap
 
 1. AI Fundamentals — started
 2. LLM Fundamentals — started
@@ -690,8 +969,8 @@ Chunking, retrieval embeddings, vector storage/search, metadata filtering, reran
 
 ## Current milestone
 
-**Completed:** Python → Ollama → Llama 3.2, continuous chat, in-memory conversation context, exact AI Engineer vs existing LLM boundary, token metrics, sliding-window context management, deliberate context failure, and LLM-generated summary/compaction experiment.
+**Completed:** Python → Ollama → Llama 3.2, continuous chat, persistent conversation history, exact AI Engineer vs existing LLM boundary, token metrics, sliding-window context management, deliberate context failure, and LLM-generated summary/compaction experiment.
 
-**New understanding:** Enterprise AI applications need a routing/orchestration layer that decides whether a task needs general LLM knowledge, enterprise retrieval, live database/API data, or an action/tool workflow. Enterprise sources remain the source of truth; LLM summaries and answers are derived information.
+**New understanding:** Enterprise AI applications need a routing/orchestration layer that decides whether a task needs general LLM knowledge, enterprise retrieval, live database/API data, or an action/tool workflow. Enterprise sources remain the source of truth; LLM summaries and answers are derived information. Chat history, structured memory, RAG, and tools are distinct information/capability sources feeding relevance-aware context construction.
 
-**Next:** Build structured memory and continue toward relevance-aware retrieval and RAG.
+**Next:** Build Context Manager V1 against the persistent conversation store, then deliberately test its limitations before introducing historical retrieval, structured memory, embeddings, vector search, and RAG.

@@ -895,7 +895,7 @@ This is a core AI Engineer responsibility and will become central to our eventua
 
 # 12. RAG — Future Practical Module
 
-Core RAG pipeline:
+## Core RAG pipeline
 
 ```text
 Documents
@@ -933,6 +933,124 @@ Grounded answer + citations
 RAG is a major context-engineering mechanism, not a replacement for context engineering itself.
 
 Chunking, retrieval embeddings, vector storage/search, metadata filtering, reranking, retrieval evaluation, and context construction are primarily AI Engineer/RAG application responsibilities. The generation model remains an existing model component unless we choose to train/fine-tune one.
+
+## RAG has two paths: Offline / Ingestion and Online / Query
+
+RAG is best understood as two connected but different paths.
+
+### 1. Offline / Ingestion path — prepare the knowledge
+
+```text
+Enterprise Data
+(PDF / SharePoint / DB / etc.)
+        │
+        ▼
+     Ingestion
+        │
+        ▼
+     Parsing
+        │
+        ▼
+    Chunking
+        │
+        ▼
+    Metadata
+        │
+        ▼
+   Embeddings
+        │
+        ▼
+Vector / Search Index
+```
+
+**Purpose:** prepare enterprise knowledge so that it can be searched efficiently later.
+
+The expensive preparation work — parsing, chunking, embedding, and indexing — should not be repeated for every user question. It is performed independently of individual queries and reused across many requests.
+
+**Offline does not mean "run once."** The ingestion/indexing path can be batch, scheduled, incremental, or event-driven. When a document changes, the affected content can be re-ingested, re-processed, re-embedded, and re-indexed.
+
+### 2. Online / Query path — retrieve knowledge for the current question
+
+```text
+User Question
+      │
+      ▼
+Query Processing
+      │
+      ▼
+Query Embedding
+      │
+      ▼
+Search Index
+      │
+      ▼
+Relevant chunks
+      │
+      ▼
+Filter / Rank / Rerank
+      │
+      ▼
+Context
+      │
+      ▼
+LLM
+      │
+      ▼
+Answer
+```
+
+**Purpose:** answer the current user request using the relevant knowledge that was prepared and indexed earlier.
+
+### Why the separation matters
+
+Without separation, every request could theoretically require:
+
+```text
+User question
+      ↓
+Read enterprise document
+      ↓
+Parse
+      ↓
+Chunk
+      ↓
+Embed
+      ↓
+Index
+      ↓
+Search
+      ↓
+Answer
+```
+
+That would be inefficient and would add unnecessary latency and compute cost.
+
+The production pattern is therefore:
+
+```text
+              PREPARE KNOWLEDGE
+                     │
+                     ▼
+               SEARCH INDEX
+                     │
+═════════════════════╪═════════════════════
+                     │
+               USER QUESTION
+                     │
+                     ▼
+              RETRIEVE KNOWLEDGE
+                     │
+                     ▼
+                    LLM
+```
+
+### Important mental model
+
+> **Offline / ingestion prepares the searchable knowledge. Online / query retrieves the relevant knowledge for the current request.**
+
+This separation is one of the first concepts to understand before learning query embeddings, vector similarity search, ranking, reranking, and advanced RAG.
+
+---
 
 # 13. Roadmap
 

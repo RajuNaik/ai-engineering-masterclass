@@ -281,7 +281,8 @@ We intentionally started without LangChain, RAG, agents, vector databases, or ot
 - Continuous chat loop
 - Exit command
 - In-memory conversation history
-- Per-request LLM input/output token metrics from the Ollama response
+- Per-request LLM input/output token metrics
+- First context manager using a recent-turn sliding window
 
 ## Current conversation state
 
@@ -289,33 +290,7 @@ We intentionally started without LangChain, RAG, agents, vector databases, or ot
 messages = []
 ```
 
-User and assistant messages are appended to the list and the conversation is sent to the model on each turn.
-
-### Where is it stored?
-
-Currently **only in RAM of the running Python process**.
-
-There is:
-- No database
-- No persistent file
-- No long-term memory store
-- No history after the process exits
-
-This is session context, not persistent memory.
-
-### Why send history again?
-
-The application effectively sends:
-
-```text
-previous conversation
-+
-new user question
-→
-LLM
-```
-
-The model is not independently remembering our application session; our application provides the relevant history in the request.
+The application stores the full conversation in memory. However, the full history is no longer automatically sent to the model. A context-building function selects the context for each request.
 
 # 6. Tokens — Practical Measurement
 
@@ -323,10 +298,11 @@ A **token** is a unit used by the model's tokenizer to represent text. A token i
 
 For our current application, we do not manually convert the messages into token IDs. Instead, Ollama's inference stack processes the request and returns useful token-count metrics.
 
-Our application now exposes:
+Our application exposes:
 
 ```text
 Messages in application memory
+Messages actually sent to LLM
 Input tokens for this request
 Output tokens generated
 ```
@@ -337,17 +313,20 @@ Conceptually:
 Python messages[]
         │
         ▼
-Context sent for this request
+Context manager
+        │
+        ▼
+Selected messages / context
         │
         ▼
 Model runtime / tokenizer
         │
-        ├── input tokens  ← prompt/context size
+        ├── input tokens
         │
         ▼
        LLM
         │
-        ├── output tokens ← generated response size
+        ├── output tokens
         │
         ▼
      response
@@ -359,13 +338,7 @@ Model runtime / tokenizer
 Application message count ≠ token count
 ```
 
-For example:
-
-```text
-7 messages
-```
-
-does **not** mean 7 tokens. A single message can contain hundreds or thousands of tokens.
+A single message can contain hundreds or thousands of tokens.
 
 ### Why AI Engineers care about token counts
 
@@ -380,9 +353,9 @@ Even though tokenization is handled by the model/runtime, token counts matter fo
 - Model selection
 - Production capacity planning
 
-# 7. Context Window and Token Budget — Next Concept
+# 7. Context Window and Token Budget
 
-The next problem we will demonstrate is that conversation history can grow much faster in tokens than the simple message count suggests.
+A model has a finite context capacity. The exact available context depends on the model and serving configuration. A production AI system therefore treats context as a constrained engineering resource rather than an unlimited transcript.
 
 ```text
 More conversation
@@ -393,7 +366,7 @@ Larger context
        ↓
 Higher latency / cost
        ↓
-Eventually context constraints
+Context pressure
 ```
 
 The AI Engineer's job is not to manually tokenize every request, but to **engineer the context sent to the model within an intentional token budget**.
@@ -407,47 +380,121 @@ Production strategies can include:
 - Enforce maximum context budgets
 - Route requests to an appropriate model
 
-# 8. Enterprise Reality Checkpoint — Conversation Context
+# 8. First Context Manager — Sliding Window
 
-Our learning implementation:
-
-```text
-messages[]
-   ↓
-Python RAM
-   ↓
-entire conversation
-   ↓
-LLM
-```
-
-A production system may use:
+Our first implementation deliberately uses a simple and explainable baseline: keep only the most recent N conversation turns when constructing the model request.
 
 ```text
-Conversation
- ↓
-Application state
- ↓
-Persistent store
- ↓
-Context selection / retrieval
- ↓
-Model
+Full application history
+        │
+        ▼
+┌──────────────────────────┐
+│ Context Manager           │
+│                           │
+│ Keep latest N turns       │
+└────────────┬─────────────┘
+             │
+             ▼
+       Model context
+             │
+             ▼
+            LLM
 ```
 
-Production concerns include:
-- Context-window limits
-- Token usage/cost
-- Latency
-- Relevance of old history
-- Summarization/compaction
-- Privacy and retention
-- Access control
-- Auditability
+Current configuration:
 
-A production context builder may combine recent chat, summarized history, relevant memory, RAG results, tool results, and business rules rather than blindly sending the entire conversation.
+```python
+MAX_HISTORY_TURNS = 3
+```
 
-# 9. RAG — Future Practical Module
+The application can still retain the full session history in `messages[]`, but only the selected recent turns are sent to the model.
+
+### Why this is useful
+
+It demonstrates the first core context-engineering principle:
+
+> **Application memory and model context are different things.**
+
+```text
+Long-term/session state
+        │
+        ▼
+   Context Manager
+        │
+        ▼
+Relevant model context
+```
+
+### Why this is NOT our final enterprise solution
+
+A fixed recent-turn window can lose important information from earlier in the conversation.
+
+Example:
+
+```text
+Turn 1: User provides a critical business requirement.
+Turn 2–5: Other discussion.
+Turn 6: User asks a question that depends on Turn 1.
+```
+
+A simple last-N strategy may no longer include Turn 1.
+
+Therefore, production systems commonly combine techniques such as recent history, summarization/compaction, structured memory, retrieval, and just-in-time context selection. Anthropic's current engineering guidance explicitly treats context as a scarce resource and highlights compaction, structured memory, sub-agent architectures, and just-in-time retrieval for long-horizon agents. citeturn0search1turn0search7
+
+### Enterprise Reality Checkpoint
+
+Our sliding window is a **teaching baseline**, not a claim that every enterprise application should use `last N turns`.
+
+The engineering goal is:
+
+```text
+Raw history / available information
+              ↓
+        Context Manager
+              ↓
+    Relevant + sufficient context
+              ↓
+        Token budget check
+              ↓
+             LLM
+```
+
+This is the first point in the course where our Python application is making an explicit **model-context decision**.
+
+# 9. Enterprise Reality — Context Engineering in Modern Agent Systems
+
+Current production-oriented agent engineering increasingly treats context as a resource that must be deliberately constructed rather than simply stuffing more information into a prompt. Recent industry guidance emphasizes token-efficient tools, just-in-time retrieval, compaction, structured memory, and careful context design for long-running agents. citeturn0search1turn0search6turn0search7
+
+A useful production pattern is:
+
+```text
+                    USER TASK
+                       │
+                       ▼
+                CONTEXT MANAGER
+                       │
+       ┌───────────────┼────────────────┐
+       ▼               ▼                ▼
+   Recent chat      Memory          Just-in-time
+                                    retrieval
+       │               │                │
+       └───────────────┼────────────────┘
+                       ▼
+                Context selection
+                       │
+                 Token budget
+                       │
+                       ▼
+                      LLM
+                       │
+                       ▼
+                Tool / RAG / Agent
+                  iteration
+```
+
+This is why **context engineering is part of the core AI Engineer skill set**, not merely prompt wording.
+
+# 10. RAG — Future Practical Module
 
 Core RAG pipeline:
 
@@ -482,39 +529,40 @@ Grounded answer + citations
 
 Chunking, retrieval embeddings, vector storage/search, metadata filtering, reranking, retrieval evaluation, and context construction are primarily part of the **AI Engineer/RAG application side**. The generation model remains an existing model component unless we choose to train/fine-tune one.
 
-# 10. Roadmap
+# 11. Roadmap
 
 1. AI Fundamentals — started
 2. LLM Fundamentals — started
 3. Python LLM Application — completed first version
 4. Conversation Context — completed first version
 5. Token measurement — completed first practical instrumentation
-6. Tokens and Context Windows — **current**
-7. Context Management / Context Engineering
-8. Embeddings
-9. Vector Search
-10. RAG + citations
-11. RAG evaluation
-12. Prompt/system instructions
-13. Structured outputs
-14. Tool calling
-15. Agents
-16. Agent memory
-17. LangGraph / agent frameworks
-18. Multi-agent systems
-19. MCP
-20. Evaluation and tracing
-21. Security and guardrails
-22. LLMOps / observability
-23. Databricks AI / enterprise integration
-24. Production deployment
-25. Enterprise AI architecture
-26. Capstone: production-style enterprise AI agent
+6. Tokens and Context Windows — current
+7. First Context Manager — **completed baseline**
+8. Context Management / Context Engineering — next
+9. Embeddings
+10. Vector Search
+11. RAG + citations
+12. RAG evaluation
+13. Prompt/system instructions
+14. Structured outputs
+15. Tool calling
+16. Agents
+17. Agent memory
+18. LangGraph / agent frameworks
+19. Multi-agent systems
+20. MCP
+21. Evaluation and tracing
+22. Security and guardrails
+23. LLMOps / observability
+24. Databricks AI / enterprise integration
+25. Production deployment
+26. Enterprise AI architecture
+27. Capstone: production-style enterprise AI agent
 
 ## Current milestone
 
-**Completed:** Python → Ollama → Llama 3.2, continuous chat, in-memory conversation context, exact AI Engineer vs existing LLM boundary, and practical token metrics.
+**Completed:** Python → Ollama → Llama 3.2, continuous chat, in-memory conversation context, exact AI Engineer vs existing LLM boundary, practical token metrics, and first sliding-window context manager.
 
-**Current:** tokens and context windows.
+**Current:** Context management / context engineering.
 
-**Next:** context-window pressure → token budget → context management.
+**Next:** Improve the context manager beyond a fixed recent-turn window using summarization, structured memory, and retrieval-aware context selection.

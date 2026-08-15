@@ -83,15 +83,9 @@ This is a permanent mental model for the course.
                                 ▼
                     ┌─────────────────────────┐
                     │ Application Logic       │  ← AI ENGINEER
-                    │                         │
-                    │ RAG                     │
-                    │ Tools / APIs            │
-                    │ Agent orchestration     │
-                    │ Memory                  │
-                    │ Guardrails              │
-                    │ Evaluation              │
-                    │ Security                │
-                    │ Observability           │
+                    │ RAG | Tools | Agents    │
+                    │ Memory | Evaluation    │
+                    │ Security | Observability│
                     └─────────────────────────┘
 ```
 
@@ -126,6 +120,7 @@ The AI Engineer primarily builds and operates the system around the model:
 - Metadata filtering and reranking
 - Tool calling
 - SQL/API integration
+- Routing/orchestration
 - Agent orchestration
 - Agent memory
 - Guardrails
@@ -135,31 +130,7 @@ The AI Engineer primarily builds and operates the system around the model:
 - Cost and latency controls
 - Deployment and production operations
 
-### Ownership table
-
-| Component | Primary scope |
-|---|---|
-| Tokenizer used by model | Existing model/runtime |
-| Token IDs | Existing model/runtime |
-| Transformer | Existing LLM |
-| Attention | Existing LLM |
-| Trained weights | Existing model |
-| Next-token generation | Existing LLM |
-| Model inference | Runtime/platform |
-| Prompt construction | AI Engineer |
-| Context selection | AI Engineer |
-| Conversation state | AI Engineer |
-| RAG | AI Engineer |
-| Chunking | AI Engineer |
-| Retrieval embeddings | AI Engineer / RAG pipeline |
-| Vector search | AI Engineer / data platform |
-| Tool integration | AI Engineer |
-| Agent orchestration | AI Engineer |
-| Memory | AI Engineer |
-| Evaluation | AI Engineer |
-| Security/authorization | AI Engineer + security/platform |
-| Observability | AI Engineer + platform |
-| Deployment | AI Engineer + platform/DevOps |
+---
 
 # 3. Tokenization Boundary
 
@@ -231,6 +202,7 @@ Possible context sources:
 - Current user request
 - Recent conversation
 - Summarized older conversation
+- Structured memory
 - RAG results
 - Long-term memory
 - Tool/API results
@@ -282,7 +254,8 @@ We intentionally started without LangChain, RAG, agents, vector databases, or ot
 - Exit command
 - In-memory conversation history
 - Per-request LLM input/output token metrics
-- First context manager using a recent-turn sliding window
+- Context manager using recent-turn selection
+- Context compaction/summarization experiment
 
 ## Current conversation state
 
@@ -290,72 +263,41 @@ We intentionally started without LangChain, RAG, agents, vector databases, or ot
 messages = []
 ```
 
-The application stores the full conversation in memory. However, the full history is no longer automatically sent to the model. A context-building function selects the context for each request.
+The application can retain the full session in memory, while the context builder decides what is actually sent to the model.
 
 # 6. Tokens — Practical Measurement
 
-A **token** is a unit used by the model's tokenizer to represent text. A token is not necessarily equal to one word; tokenization depends on the model/tokenizer and can split words, punctuation, whitespace patterns, or other text into multiple pieces.
+A token is a unit used by the model tokenizer to represent text. It is not necessarily equal to one word; tokenization depends on the model/tokenizer.
 
-For our current application, we do not manually convert the messages into token IDs. Instead, Ollama's inference stack processes the request and returns useful token-count metrics.
-
-Our application exposes:
-
-```text
-Messages in application memory
-Messages actually sent to LLM
-Input tokens for this request
-Output tokens generated
-```
-
-Conceptually:
+Our application does not manually convert messages into token IDs. The model/runtime handles tokenization and inference, while our application observes token metrics and manages context.
 
 ```text
 Python messages[]
-        │
-        ▼
+        ↓
 Context manager
-        │
-        ▼
-Selected messages / context
-        │
-        ▼
+        ↓
+Selected context
+        ↓
 Model runtime / tokenizer
-        │
-        ├── input tokens
-        │
-        ▼
-       LLM
-        │
-        ├── output tokens
-        │
-        ▼
-     response
+        ↓
+LLM
+        ↓
+Generated tokens
+        ↓
+Text response
 ```
 
-### Important distinction
+Important distinction:
 
 ```text
 Application message count ≠ token count
 ```
 
-A single message can contain hundreds or thousands of tokens.
-
-### Why AI Engineers care about token counts
-
-Even though tokenization is handled by the model/runtime, token counts matter for:
-
-- Context-window limits
-- Latency
-- Cost for hosted models
-- Prompt/context optimization
-- RAG retrieval budgets
-- Conversation compaction
-- Model selection
-- Production capacity planning
+Token awareness matters for context-window limits, latency, hosted-model cost, RAG budgets, compaction, model selection, and capacity planning.
 
 # 7. Context Window and Token Budget
 
-A model has a finite context capacity. The exact available context depends on the model and serving configuration. A production AI system therefore treats context as a constrained engineering resource rather than an unlimited transcript.
+A model has finite context capacity. The exact available context depends on the model and serving configuration.
 
 ```text
 More conversation
@@ -369,132 +311,310 @@ Higher latency / cost
 Context pressure
 ```
 
-The AI Engineer's job is not to manually tokenize every request, but to **engineer the context sent to the model within an intentional token budget**.
+The AI Engineer's responsibility is to engineer the information sent to the model within an intentional budget.
 
-Production strategies can include:
-- Keep recent messages
-- Summarize older history
-- Retrieve relevant memory
-- Retrieve only relevant RAG chunks
-- Compress context
-- Enforce maximum context budgets
-- Route requests to an appropriate model
+# 8. Context Manager Evolution
 
-# 8. First Context Manager — Sliding Window
-
-Our first implementation deliberately uses a simple and explainable baseline: keep only the most recent N conversation turns when constructing the model request.
+## V1 — Entire history
 
 ```text
-Full application history
-        │
-        ▼
-┌──────────────────────────┐
-│ Context Manager           │
-│                           │
-│ Keep latest N turns       │
-└────────────┬─────────────┘
-             │
-             ▼
-       Model context
-             │
-             ▼
-            LLM
+Full application history → LLM
 ```
 
-Current configuration:
+Simple, but context grows indefinitely.
+
+## V2 — Sliding window
+
+```text
+Full history
+     ↓
+Keep latest N turns
+     ↓
+LLM
+```
+
+This reduced token growth but created a deliberate failure: relevant older information disappeared. Our experiment demonstrated that the model could confidently misinterpret `RAG` when the earlier conversational definition was outside the model context.
+
+### Core lesson
+
+```text
+Application Memory ≠ Model Context
+
+Recency ≠ Relevance
+```
+
+## V3 — Summary + recent turns
+
+```text
+Older history
+     ↓
+LLM summarizer
+     ↓
+Conversation summary
+     +
+Recent turns
+     ↓
+Context Builder
+     ↓
+LLM
+```
+
+This preserves compressed older context, but the summary is itself LLM-generated and therefore **derived information**. It can omit, distort, or misrepresent details.
+
+### Source-of-truth principle
+
+Do not treat an LLM-generated summary as the authoritative source for enterprise facts.
+
+```text
+Enterprise source of truth
+        ≠
+LLM-generated summary
+        ≠
+LLM-generated answer
+```
+
+For authoritative information, the application should be able to retrieve the underlying enterprise record/document when needed.
+
+# 9. Enterprise Context Engineering
+
+A production system should assemble context based on **relevance, reliability, authority, task requirements, and token budget** rather than simply sending the last few messages.
+
+```text
+                         USER TASK
+                            │
+                            ▼
+                     CONTEXT ENGINE
+                            │
+       ┌────────────────────┼────────────────────┐
+       ▼                    ▼                    ▼
+ Recent conversation   Structured memory     Retrieval / RAG
+       │                    │                    │
+       └────────────────────┼────────────────────┘
+                            ▼
+                    Context selection
+                            │
+                       Token budget
+                            │
+                            ▼
+                           LLM
+```
+
+Possible context sources include recent chat, summaries, structured application state, relevant enterprise documents, database results, tool outputs, business rules, and agent state.
+
+### Important rule
+
+**Do not retrieve enterprise data blindly before every LLM call.** Instead, the application should determine what the task requires.
+
+Examples:
+
+```text
+General concept question
+        ↓
+LLM may answer directly
+```
+
+```text
+Company policy question
+        ↓
+Retrieve authoritative enterprise knowledge
+        ↓
+Context
+        ↓
+LLM
+```
+
+```text
+Live inventory question
+        ↓
+Database/API tool
+        ↓
+Current data
+        ↓
+LLM
+```
+
+```text
+"If inventory is below threshold, create replenishment request"
+        ↓
+Agent/orchestrator
+        ↓
+Retrieve policy + query inventory
+        ↓
+Evaluate condition
+        ↓
+Authorized action tool
+        ↓
+Validate result
+        ↓
+LLM response
+```
+
+---
+
+# 10. Router / Orchestration — AI Engineer Scope
+
+The **routing/orchestration layer is primarily an AI Engineer responsibility** in the application architecture.
+
+The router decides what capability or information source is appropriate for a task. It does not have to be a giant hard-coded `if/else` tree; it can evolve from deterministic rules to model-based routing and eventually agentic orchestration.
+
+### Exact pattern
+
+```text
+                         USER REQUEST
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │ AI APPLICATION    │
+                    │ / ORCHESTRATOR    │
+                    └─────────┬─────────┘
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │ TASK / CONTEXT    │
+                    │ DECISION LAYER    │
+                    └─────────┬─────────┘
+                              │
+                 ┌────────────┼────────────┐
+                 │            │            │
+                 ▼            ▼            ▼
+                RAG        Database      Tools/APIs
+                 │            │            │
+                 ▼            ▼            ▼
+            Enterprise     Live data     Actions
+             knowledge
+                 │            │            │
+                 └────────────┼────────────┘
+                              ▼
+                     CONTEXT ENGINEERING
+                              │
+                         Token budget
+                              │
+                              ▼
+                             LLM
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+                  Answer              Action
+```
+
+### Examples
+
+**General knowledge:**
+
+```text
+"What is an embedding?"
+        ↓
+General LLM knowledge
+        ↓
+LLM
+```
+
+**Enterprise policy:**
+
+```text
+"What is our inventory policy?"
+        ↓
+Router
+        ↓
+RAG / enterprise knowledge
+        ↓
+Retrieve + rank + context
+        ↓
+LLM
+```
+
+**Live enterprise data:**
+
+```text
+"What is inventory for plant 1001?"
+        ↓
+Router
+        ↓
+SQL/API tool
+        ↓
+Database
+        ↓
+LLM
+```
+
+**Action-oriented task:**
+
+```text
+"If plant 1001 is below threshold, create a replenishment request."
+        ↓
+Agent / orchestrator
+        ↓
+Retrieve business rule
+        ↓
+Query inventory
+        ↓
+Evaluate condition
+        ↓
+Call authorized action API
+        ↓
+Validate result
+        ↓
+LLM response
+```
+
+### Router evolution
+
+#### V1 — Deterministic routing
 
 ```python
-MAX_HISTORY_TURNS = 3
+if requires_enterprise_policy(question):
+    use_rag()
+elif requires_live_data(question):
+    use_database()
+else:
+    use_llm()
 ```
 
-The application can still retain the full session history in `messages[]`, but only the selected recent turns are sent to the model.
+Useful for learning and simple stable workflows.
 
-### Why this is useful
-
-It demonstrates the first core context-engineering principle:
-
-> **Application memory and model context are different things.**
+#### V2 — Model-based routing
 
 ```text
-Long-term/session state
-        │
-        ▼
-   Context Manager
-        │
-        ▼
-Relevant model context
+User request
+    ↓
+Router model / classifier
+    ↓
+Intent / task classification
+    ↓
+RAG / SQL / API / general LLM
 ```
 
-### Why this is NOT our final enterprise solution
-
-A fixed recent-turn window can lose important information from earlier in the conversation.
-
-Example:
+#### V3 — Agentic orchestration
 
 ```text
-Turn 1: User provides a critical business requirement.
-Turn 2–5: Other discussion.
-Turn 6: User asks a question that depends on Turn 1.
+User task
+    ↓
+Agent
+    ↓
+Reason / select capability
+    ↓
+Tool call
+    ↓
+Observe result
+    ↓
+Select next step
+    ↓
+Complete task
 ```
 
-A simple last-N strategy may no longer include Turn 1.
+### Critical boundary
 
-Therefore, production systems commonly combine techniques such as recent history, summarization/compaction, structured memory, retrieval, and just-in-time context selection. Anthropic's current engineering guidance explicitly treats context as a scarce resource and highlights compaction, structured memory, sub-agent architectures, and just-in-time retrieval for long-horizon agents. citeturn0search1turn0search7
+The **LLM provides language understanding, reasoning/generation, and can produce tool-call requests**. The application owns the actual routing policy, authorization, tool execution, enterprise-system integration, validation, and orchestration workflow.
 
-### Enterprise Reality Checkpoint
+The LLM should not be treated as the enterprise database or as the source of truth.
 
-Our sliding window is a **teaching baseline**, not a claim that every enterprise application should use `last N turns`.
+### Enterprise routing principle
 
-The engineering goal is:
+> **Determine what the task requires → retrieve authoritative information or invoke an appropriate capability when needed → construct the best context → invoke the model → validate and/or safely execute the result.**
 
-```text
-Raw history / available information
-              ↓
-        Context Manager
-              ↓
-    Relevant + sufficient context
-              ↓
-        Token budget check
-              ↓
-             LLM
-```
+This is a core AI Engineer responsibility and will become central to our eventual enterprise agent.
 
-This is the first point in the course where our Python application is making an explicit **model-context decision**.
-
-# 9. Enterprise Reality — Context Engineering in Modern Agent Systems
-
-Current production-oriented agent engineering increasingly treats context as a resource that must be deliberately constructed rather than simply stuffing more information into a prompt. Recent industry guidance emphasizes token-efficient tools, just-in-time retrieval, compaction, structured memory, and careful context design for long-running agents. citeturn0search1turn0search6turn0search7
-
-A useful production pattern is:
-
-```text
-                    USER TASK
-                       │
-                       ▼
-                CONTEXT MANAGER
-                       │
-       ┌───────────────┼────────────────┐
-       ▼               ▼                ▼
-   Recent chat      Memory          Just-in-time
-                                    retrieval
-       │               │                │
-       └───────────────┼────────────────┘
-                       ▼
-                Context selection
-                       │
-                 Token budget
-                       │
-                       ▼
-                      LLM
-                       │
-                       ▼
-                Tool / RAG / Agent
-                  iteration
-```
-
-This is why **context engineering is part of the core AI Engineer skill set**, not merely prompt wording.
-
-# 10. RAG — Future Practical Module
+# 11. RAG — Future Practical Module
 
 Core RAG pipeline:
 
@@ -518,6 +638,10 @@ Query embedding
    ↓
 Vector search
    ↓
+Candidate results
+   ↓
+Metadata filtering / reranking
+   ↓
 Relevant chunks
    ↓
 Context builder
@@ -527,42 +651,47 @@ Existing LLM
 Grounded answer + citations
 ```
 
-Chunking, retrieval embeddings, vector storage/search, metadata filtering, reranking, retrieval evaluation, and context construction are primarily part of the **AI Engineer/RAG application side**. The generation model remains an existing model component unless we choose to train/fine-tune one.
+RAG is a major context-engineering mechanism, not a replacement for context engineering itself.
 
-# 11. Roadmap
+Chunking, retrieval embeddings, vector storage/search, metadata filtering, reranking, retrieval evaluation, and context construction are primarily AI Engineer/RAG application responsibilities. The generation model remains an existing model component unless we choose to train/fine-tune one.
+
+# 12. Roadmap
 
 1. AI Fundamentals — started
 2. LLM Fundamentals — started
 3. Python LLM Application — completed first version
 4. Conversation Context — completed first version
-5. Token measurement — completed first practical instrumentation
-6. Tokens and Context Windows — current
-7. First Context Manager — **completed baseline**
-8. Context Management / Context Engineering — next
-9. Embeddings
-10. Vector Search
-11. RAG + citations
-12. RAG evaluation
-13. Prompt/system instructions
-14. Structured outputs
-15. Tool calling
-16. Agents
-17. Agent memory
-18. LangGraph / agent frameworks
-19. Multi-agent systems
-20. MCP
-21. Evaluation and tracing
-22. Security and guardrails
-23. LLMOps / observability
-24. Databricks AI / enterprise integration
-25. Production deployment
-26. Enterprise AI architecture
-27. Capstone: production-style enterprise AI agent
+5. Token measurement — completed
+6. Context Window / Token Budget — understood
+7. Sliding-window Context Manager — completed baseline
+8. Context compaction / summarization — completed experiment
+9. Structured Memory — next
+10. Semantic Retrieval
+11. Embeddings
+12. Vector Search
+13. RAG + citations
+14. RAG evaluation
+15. Prompt/system instructions
+16. Structured outputs
+17. Tool calling
+18. Router / orchestration
+19. Agents
+20. Agent memory
+21. LangGraph / agent frameworks
+22. Multi-agent systems
+23. MCP
+24. Evaluation and tracing
+25. Security and guardrails
+26. LLMOps / observability
+27. Databricks AI / enterprise integration
+28. Production deployment
+29. Enterprise AI architecture
+30. Capstone: production-style enterprise AI agent
 
 ## Current milestone
 
-**Completed:** Python → Ollama → Llama 3.2, continuous chat, in-memory conversation context, exact AI Engineer vs existing LLM boundary, practical token metrics, and first sliding-window context manager.
+**Completed:** Python → Ollama → Llama 3.2, continuous chat, in-memory conversation context, exact AI Engineer vs existing LLM boundary, token metrics, sliding-window context management, deliberate context failure, and LLM-generated summary/compaction experiment.
 
-**Current:** Context management / context engineering.
+**New understanding:** Enterprise AI applications need a routing/orchestration layer that decides whether a task needs general LLM knowledge, enterprise retrieval, live database/API data, or an action/tool workflow. Enterprise sources remain the source of truth; LLM summaries and answers are derived information.
 
-**Next:** Improve the context manager beyond a fixed recent-turn window using summarization, structured memory, and retrieval-aware context selection.
+**Next:** Build structured memory and continue toward relevance-aware retrieval and RAG.

@@ -1051,7 +1051,221 @@ The production pattern is therefore:
 This separation is one of the first concepts to understand before learning query embeddings, vector similarity search, ranking, reranking, and advanced RAG.
 
 ---
-
+                    RAG
+                     │
+                     ▼
+              1. WHY RAG?
+                     │
+                     ▼
+          2. RAG ARCHITECTURE
+                     │
+                     ▼
+       ┌─────────────────────────┐
+       │     INGESTION SIDE      │
+       └────────────┬────────────┘
+                    │
+                    ▼
+          3. Data Sources
+             PDF / DOCX / HTML
+             SharePoint / DB
+             APIs / Files
+                    │
+                    ▼
+          4. Ingestion
+             Batch
+             Incremental
+             Event-driven
+                    │
+                    ▼
+          5. Parsing / Extraction
+             Text
+             Tables
+             Layout
+             Metadata
+                    │
+                    ▼
+          6. Cleaning / Normalization
+                    │
+                    ▼
+          7. CHUNKING
+             Fixed
+             Recursive
+             Semantic
+             Parent-child
+             Hierarchical
+                    │
+                    ▼
+          8. Metadata
+             ACL
+             source
+             page
+             section
+             version
+             tenant
+                    │
+                    ▼
+          9. EMBEDDINGS
+             Text → Vector
+                    │
+                    ▼
+         10. Embedding Models
+             Hugging Face
+             Sentence Transformers
+             OpenAI
+             BGE
+             E5
+             etc.
+                    │
+                    ▼
+         11. Vector Storage
+             FAISS
+             pgvector
+             Pinecone
+             Milvus
+             Weaviate
+             Chroma
+             Databricks Vector Search
+                    │
+                    ▼
+         12. Vector Indexes
+             HNSW
+             IVF
+             ANN
+                    │
+                    ▼
+              SEARCH INDEX
+                    │
+════════════════════╪════════════════════
+                    │
+                    │ QUERY / ONLINE
+                    │
+                    ▼
+             USER QUESTION
+                    │
+                    ▼
+         13. Query Processing
+                    │
+                    ▼
+         14. Query Embedding
+                    │
+                    ▼
+         15. Retrieval
+             Top-K
+             similarity
+             threshold
+                    │
+                    ▼
+         16. Metadata Filtering
+                    │
+                    ▼
+         17. Keyword Search
+             BM25
+                    │
+                    ▼
+         18. Hybrid Search
+             Vector + Keyword
+                    │
+                    ▼
+         19. Fusion
+             RRF
+             weighted fusion
+                    │
+                    ▼
+         20. Ranking
+                    │
+                    ▼
+         21. Reranking
+             Cross Encoder
+             BGE
+             Cohere
+                    │
+                    ▼
+         22. Context Selection
+                    │
+                    ▼
+         23. Context Compression
+                    │
+                    ▼
+         24. Prompt / Context Builder
+                    │
+                    ▼
+                    LLM
+                    │
+                    ▼
+             Grounded Answer
+                    │
+                    ▼
+             Citations / Sources
+                    │
+════════════════════╪════════════════════
+                    │
+                    ▼
+            ADVANCED RAG
+                    │
+        ┌───────────┼────────────┐
+        ▼           ▼            ▼
+ Query Rewrite   Multi Query    HyDE
+        │           │            │
+        └───────────┼────────────┘
+                    ▼
+           Parent-Child RAG
+                    │
+                    ▼
+        Contextual Retrieval
+                    │
+                    ▼
+          Multi-Hop Retrieval
+                    │
+                    ▼
+              Graph RAG
+                    │
+                    ▼
+             Agentic RAG
+                    │
+                    ▼
+             Corrective RAG
+                    │
+                    ▼
+          Adaptive / Self RAG
+                    │
+                    ▼
+             RAG EVALUATION
+                    │
+        ┌───────────┼─────────────┐
+        ▼           ▼             ▼
+   Retrieval     Generation    End-to-End
+   Evaluation    Evaluation    Evaluation
+        │           │             │
+        ▼           ▼             ▼
+ Precision       Faithfulness   Answer quality
+ Recall          Relevance      Groundedness
+        │           │             │
+        └───────────┼─────────────┘
+                    ▼
+             RAGAS / Custom
+                    │
+                    ▼
+          PRODUCTION RAG
+                    │
+        ┌───────────┼────────────┐
+        ▼           ▼            ▼
+ Security       Performance     Cost
+        │           │             │
+        ▼           ▼             ▼
+ ACL / RBAC     Latency        Token usage
+ Multi-tenancy  Throughput      Caching
+ Freshness      Scaling         Indexing
+        │           │             │
+        └───────────┼─────────────┘
+                    ▼
+             OBSERVABILITY
+                    │
+                    ▼
+          LANGCHAIN / LLAMAINDEX
+                    │
+                    ▼
+       ENTERPRISE RAG ARCHITECTURE
+       
 # 13. Roadmap
 
 1. AI Fundamentals — started
